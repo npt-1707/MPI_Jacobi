@@ -12,15 +12,16 @@
 #define D 0.1
 #define TOLERANCE 0.001
 
-void DisplayMatrix(float *A, int row, int col);
-void Initialize(float *A, int row, int col);
-void Write2File(float *A, int row, int col, float tol, int mode);
-float Heat2D(float *A, float *dA, float *Top, float *Bottom, int row, int col);
-void UpdateHeat2D(float *A, float *dA, int row, int col);
-float max(float *A, int n);
+void DisplayMatrix(float *A, int row, int col);                                 // Display matrix
+void Initialize(float *A, int row, int col);                                    // Initialize matrix
+void Write2File(float *A, int row, int col, float tol, int mode);               // Write matrix to file: mode 0 is for result only, mode 1 is for demo all states
+float Heat2D(float *A, float *dA, float *Top, float *Bottom, int row, int col); // Calculate the heat changes and return the maximum change
+void UpdateHeat2D(float *A, float *dA, int row, int col);                       // Update the heat matrix
+// float max(float *A, int n);                                                     // Find the maximum value in an array
 
 int main(int argc, char *argv[])
 {
+    // Passing parameters
     int n_rows, n_cols, mode;
     float tolerance;
     if (argc == 5)
@@ -47,18 +48,24 @@ int main(int argc, char *argv[])
     float maximum, global_maximum, start, end;
     int NP, rank, size, num_loops = 0;
     bool running = true;
-    A = (float *)malloc((n_rows * n_cols) * sizeof(float));
-    dA = (float *)malloc((n_rows * n_cols) * sizeof(float));
+    A = (float *)malloc((n_rows * n_cols) * sizeof(float));  // A is the matrix of heat
+    dA = (float *)malloc((n_rows * n_cols) * sizeof(float)); // dA is the matrix of heat changes
+
+    // MPI Init
     MPI_Status status;
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &NP);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    // calculate size of each process and allocate memory for subA, subdA, Top, Bottom
     size = n_rows / NP;
-    subA = (float *)malloc((size * n_cols) * sizeof(float));
-    subdA = (float *)malloc((size * n_cols) * sizeof(float));
-    Top = (float *)malloc(n_cols * sizeof(float));
-    Bottom = (float *)malloc(n_cols * sizeof(float));
-    // M = (float *)malloc(NP * sizeof(float));
+    subA = (float *)malloc((size * n_cols) * sizeof(float));  // subA is the sub-matrix of A
+    subdA = (float *)malloc((size * n_cols) * sizeof(float)); // subdA is the sub-matrix of dA
+    Top = (float *)malloc(n_cols * sizeof(float));            // Top is the top row of subA
+    Bottom = (float *)malloc(n_cols * sizeof(float));         // Bottom is the bottom row of subA
+    // M = (float *)malloc(NP * sizeof(float));                 // M is the array of maximum values of each process
+
+    // Initialize
     if (rank == 0)
     {
         Initialize(A, n_rows, n_cols);
@@ -70,26 +77,29 @@ int main(int argc, char *argv[])
     }
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
+
+    // Scatter data
     MPI_Scatter(A, size * n_cols, MPI_FLOAT,
                 subA, size * n_cols, MPI_FLOAT, 0,
                 MPI_COMM_WORLD);
-    // if (rank == 0)
-    // {
-    //     for (int dest_rank = 1; dest_rank < NP; dest_rank++)
-    //     {
-    //         MPI_Send(&A[dest_rank * size * n_cols], size * n_cols, MPI_FLOAT, dest_rank, 0, MPI_COMM_WORLD);
-    //     }
-    //     // Root process keeps its part of the data
-    //     memcpy(subA, &A[0], size * n_cols * sizeof(float));
-    // }
-    // else
-    // {
-    //     MPI_Recv(subA, size * n_cols, MPI_FLOAT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    // }
-    // MPI_Barrier(MPI_COMM_WORLD);
+    /* if (rank == 0)
+    {
+        for (int dest_rank = 1; dest_rank < NP; dest_rank++)
+        {
+            MPI_Send(&A[dest_rank * size * n_cols], size * n_cols, MPI_FLOAT, dest_rank, 0, MPI_COMM_WORLD);
+        }
+        // Root process keeps its part of the data
+        memcpy(subA, &A[0], size * n_cols * sizeof(float));
+    }
+    else
+    {
+        MPI_Recv(subA, size * n_cols, MPI_FLOAT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+    MPI_Barrier(MPI_COMM_WORLD); */
 
     do
     {
+        // Send and Recv top row
         if (rank == 0)
         {
             for (int j = 0; j < n_cols; j++)
@@ -105,7 +115,8 @@ int main(int argc, char *argv[])
             MPI_Send(subA + (size - 1) * n_cols, n_cols, MPI_FLOAT, rank + 1, rank, MPI_COMM_WORLD);
             MPI_Recv(Top, n_cols, MPI_FLOAT, rank - 1, rank - 1, MPI_COMM_WORLD, &status);
         }
-        //
+
+        // Send and Recv bottom row
         if (rank == NP - 1)
         {
             for (int j = 0; j < n_cols; j++)
@@ -122,22 +133,29 @@ int main(int argc, char *argv[])
             MPI_Recv(Bottom, n_cols, MPI_FLOAT, rank + 1, rank + 1, MPI_COMM_WORLD, &status);
         }
 
+        // Calculate heat changes
         maximum = Heat2D(subA, subdA, Top, Bottom, size, n_cols);
         MPI_Barrier(MPI_COMM_WORLD);
+
+        // Reduce local maximum to global_maximum
         MPI_Allreduce(&maximum, &global_maximum, 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
-        // *(M + rank) = maximum;
-        // for (int i = 0; i < NP; i++)
-        // {
-        //     if (rank != i)
-        //     {
-        //         MPI_Send(&maximum, 1, MPI_FLOAT, i, rank, MPI_COMM_WORLD);
-        //         MPI_Recv(M + i, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD, &status);
-        //     }
-        // }
-        // global_maximum = max(M, NP);
+        /* *(M + rank) = maximum;
+        for (int i = 0; i < NP; i++)
+        {
+            if (rank != i)
+            {
+                MPI_Send(&maximum, 1, MPI_FLOAT, i, rank, MPI_COMM_WORLD);
+                MPI_Recv(M + i, 1, MPI_FLOAT, i, i, MPI_COMM_WORLD, &status);
+            }
+        }
+        global_maximum = max(M, NP);*/
+
+        // Update heat matrix
         UpdateHeat2D(subA, subdA, size, n_cols);
         num_loops++;
         MPI_Barrier(MPI_COMM_WORLD);
+
+        // Gather data to save if mode == 1 for saving all states
         if (mode == 1)
         {
             MPI_Gather(subA, size * n_cols, MPI_FLOAT, A, size * n_cols, MPI_FLOAT, 0, MPI_COMM_WORLD);
@@ -148,10 +166,13 @@ int main(int argc, char *argv[])
         }
     } while (global_maximum > tolerance);
 
+    // Gather data in final step
     MPI_Gather(subA, size * n_cols, MPI_FLOAT, A, size * n_cols, MPI_FLOAT, 0, MPI_COMM_WORLD);
     end = MPI_Wtime();
+
+    // Display results
     if (rank == 0)
-    {   
+    {
         Write2File(A, n_rows, n_cols, tolerance, 0);
         printf("Parallel\n");
         printf("N_rows: %d - N_cols: %d - Tolerance: %f\n", n_rows, n_cols, tolerance);
@@ -274,15 +295,15 @@ void UpdateHeat2D(float *A, float *dA, int row, int col)
         }
 }
 //==================================
-float max(float *A, int n)
-{
-    float maximum = *A;
-    for (int i = 1; i < n; i++)
-    {
-        if (maximum < *(A + i))
-        {
-            maximum = *(A + i);
-        }
-    }
-    return maximum;
-}
+// float max(float *A, int n)
+// {
+//     float maximum = *A;
+//     for (int i = 1; i < n; i++)
+//     {
+//         if (maximum < *(A + i))
+//         {
+//             maximum = *(A + i);
+//         }
+//     }
+//     return maximum;
+// }

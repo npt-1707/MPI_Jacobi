@@ -4,19 +4,20 @@
 
 #define N_ROWS 20
 #define N_COLS 20
+#define TOLERANCE 0.0001
 #define dt 0.01
 #define dx 0.1
 #define D 0.1
-#define TOLERANCE 0.0001
 
-void DisplayMatrix(float *A, int row, int col);
-void Initialize(float *A, int row, int col);
-void Write2File(float *A, int row, int col, float tol);
-float Heat2D(float *A, float *dA, int row, int col);
-void UpdateHeat2D(float *A, float *dA, int row, int col);
+void DisplayMatrix(float *A, int row, int col);           // Display matrix
+void Initialize(float *A, int row, int col);              // Initialize matrix
+void Write2File(float *A, int row, int col, float tol);   // Write matrix to file
+float Heat2D(float *A, float *dA, int row, int col);      // Calculate the heat changes and return the maximum change
+void UpdateHeat2D(float *A, float *dA, int row, int col); // Update the heat matrix
 
 int main(int argc, char *argv[])
 {
+    // Passing parameters
     int n_rows, n_cols;
     float tolerance;
     if (argc == 4)
@@ -38,11 +39,16 @@ int main(int argc, char *argv[])
     }
     float *A, *dA, a, north, south, west, east, maximum;
     int num_loops = 0;
+
     A = (float *)malloc((n_rows * n_cols) * sizeof(float));
     dA = (float *)malloc((n_rows * n_cols) * sizeof(float));
+
+    // Initial state
     Initialize(A, n_rows, n_cols);
     Write2File(A, n_rows, n_cols, tolerance);
     clock_t start = clock();
+
+    // Jacobi loop
     do
     {
         maximum = Heat2D(A, dA, n_rows, n_cols);
@@ -52,12 +58,14 @@ int main(int argc, char *argv[])
     } while (maximum > tolerance);
     clock_t end = clock();
     Write2File(A, n_rows, n_cols, tolerance);
-    free(A);
-    free(dA);
+
+    // Display result
     printf("Sequential\n");
     printf("N_rows: %d - N_cols: %d - Tolerance: %f\n", n_rows, n_cols, tolerance);
     printf("Loops: %d\n", num_loops);
     printf("Running time: %f seconds\n", (float)(end - start) / CLOCKS_PER_SEC);
+    free(A);
+    free(dA);
     return 0;
 }
 
